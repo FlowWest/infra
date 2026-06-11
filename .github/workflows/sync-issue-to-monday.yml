@@ -134,7 +134,7 @@ jobs:
               req = urllib.request.Request(ENDPOINT, data=payload, headers=HEADERS, method="POST")
               try:
                   with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-                      result = json.loads(r.read())
+                      raw = r.read()
               except urllib.error.HTTPError as e:
                   print(f"Error: monday API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
                   sys.exit(1)
@@ -143,6 +143,12 @@ jobs:
                   sys.exit(1)
               except TimeoutError:
                   print(f"Error: monday API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+              try:
+                  result = json.loads(raw)
+              except json.JSONDecodeError as e:
+                  print(f"Error: monday API returned malformed JSON: {e}", file=sys.stderr)
+                  print(f"       Raw response: {raw[:200]}", file=sys.stderr)
                   sys.exit(1)
               if "errors" in result:
                   print(f"Error: monday API returned GraphQL errors: {result['errors']}", file=sys.stderr)
@@ -256,7 +262,7 @@ jobs:
               req = urllib.request.Request(ENDPOINT, data=payload, headers=HEADERS, method="POST")
               try:
                   with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-                      result = json.loads(r.read())
+                      raw = r.read()
               except urllib.error.HTTPError as e:
                   print(f"Error: monday API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
                   sys.exit(1)
@@ -265,6 +271,12 @@ jobs:
                   sys.exit(1)
               except TimeoutError:
                   print(f"Error: monday API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+              try:
+                  result = json.loads(raw)
+              except json.JSONDecodeError as e:
+                  print(f"Error: monday API returned malformed JSON: {e}", file=sys.stderr)
+                  print(f"       Raw response: {raw[:200]}", file=sys.stderr)
                   sys.exit(1)
               if "errors" in result:
                   print(f"Error: monday API returned GraphQL errors: {result['errors']}", file=sys.stderr)
