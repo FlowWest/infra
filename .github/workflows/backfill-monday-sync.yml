@@ -1,0 +1,246 @@
+name: Backfill monday.com from GitHub issues (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        description: "GitHub repo to read issues from (owner/repo)"
+        required: true
+        type: string
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+      MONDAY_API_TOKEN:
+        required: true
+      MONDAY_BOARD_ID:
+        required: true
+      MONDAY_ITEM_LINK_COL:
+        required: true
+      MONDAY_ITEM_STATUS_COL:
+        required: true
+      MONDAY_ITEM_OWNER_COL:
+        required: true
+      MONDAY_SUBITEM_BOARD_ID:
+        required: true
+      MONDAY_SUBITEM_LINK_COL:
+        required: true
+      MONDAY_SUBITEM_STATUS_COL:
+        required: true
+      MONDAY_SUBITEM_OWNER_COL:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+
+    env:
+      ITEM_BOARD_ID:      ${{ secrets.MONDAY_BOARD_ID }}
+      ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
+      ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
+      ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
+      SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
+      SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
+      SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
+      SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
+
+    steps:
+      - name: Backfill monday from GitHub issue state
+        env:
+          GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          REPO:             ${{ inputs.repo }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, sys, time
+          import urllib.request, urllib.error
+
+          GITHUB_TOKEN     = os.environ["GITHUB_TOKEN"]
+          MONDAY_API_TOKEN = os.environ["MONDAY_API_TOKEN"]
+          REPO             = os.environ["REPO"]
+
+          BOARDS = [
+              (os.environ["ITEM_BOARD_ID"],    os.environ["ITEM_LINK_COL"],    os.environ["ITEM_STATUS_COL"],    os.environ["ITEM_OWNER_COL"],    "items"),
+              (os.environ["SUBITEM_BOARD_ID"], os.environ["SUBITEM_LINK_COL"], os.environ["SUBITEM_STATUS_COL"], os.environ["SUBITEM_OWNER_COL"], "subitems"),
+          ]
+
+          # FlowWest team: GitHub login → monday display name.
+          # Update this when team members join or leave.
+          USER_MAP = {
+              "thesadie":       "Sadie Gill",
+              "ergz":           "Emanuel Rodriguez",
+              "alvizek":        "Ashley Vizek",
+              "B-yunes":        "Badhia Yunes Katz",
+              "catarfish":      "Catarina Pien",
+              "ctennerFW":      "Cameron Tenner",
+              "ErinCain":       "Erin Cain",
+              "InigoP":         "Inigo Peng",
+              "JordanHoang":    "Jordan Hoang",
+              "liz-fw":         "Liz Stebbins",
+              "MaddeeRubenson": "Maddee Rubenson",
+              "skylerlewis":    "Skyler Lewis",
+              "wdwiii":         "Willie Whitfield",
+          }
+
+          STATUS_LABELS = {0: "In Progress", 1: "Done"}
+          TIMEOUT = 30
+
+          print(f"Repo: {REPO}")
+          print("=" * 60)
+
+          # ── Helpers ──────────────────────────────────────────────────────
+
+          def gh_get(url):
+              req = urllib.request.Request(url, headers={
+                  "Authorization": f"Bearer {GITHUB_TOKEN}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                      return json.loads(r.read()), dict(r.headers)
+              except urllib.error.HTTPError as e:
+                  print(f"Error: GitHub API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+              except urllib.error.URLError as e:
+                  print(f"Error: could not reach GitHub API: {e.reason}", file=sys.stderr)
+                  sys.exit(1)
+              except TimeoutError:
+                  print(f"Error: GitHub API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+
+          def monday_gql(query, variables=None):
+              payload = json.dumps({"query": query, "variables": variables or {}}).encode()
+              req = urllib.request.Request(
+                  "https://api.monday.com/v2",
+                  data=payload,
+                  headers={
+                      "Content-Type": "application/json",
+                      "Authorization": MONDAY_API_TOKEN,
+                      "API-Version": "2024-10",
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                      result = json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Error: monday API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+              except urllib.error.URLError as e:
+                  print(f"Error: could not reach monday API: {e.reason}", file=sys.stderr)
+                  sys.exit(1)
+              except TimeoutError:
+                  print(f"Error: monday API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+              if "errors" in result:
+                  print(f"Error: monday API returned GraphQL errors: {result['errors']}", file=sys.stderr)
+                  print(f"       Query variables: {variables}", file=sys.stderr)
+                  sys.exit(1)
+              return result
+
+          SEARCH_QUERY = """
+          query ($boardId: ID!, $colId: String!, $val: String!) {
+            items_page_by_column_values(
+              board_id: $boardId
+              limit: 20
+              columns: [{ column_id: $colId, column_values: [$val] }]
+            ) { items { id name } }
+          }
+          """
+
+          UPDATE_MUTATION = """
+          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $val: JSON!) {
+            change_column_value(
+              item_id: $itemId board_id: $boardId column_id: $colId value: $val
+            ) { id }
+          }
+          """
+
+          # ── Fetch all GitHub issues (paginated, excluding PRs) ────────────
+
+          print("Fetching issues from GitHub...")
+          issues = []
+          page = 1
+          while True:
+              url = f"https://api.github.com/repos/{REPO}/issues?state=all&per_page=100&page={page}"
+              batch, _ = gh_get(url)
+              if not batch:
+                  break
+              # GitHub issues API also returns PRs — filter them out
+              issues += [i for i in batch if "pull_request" not in i]
+              if len(batch) < 100:
+                  break
+              page += 1
+              time.sleep(0.5)  # be polite to the API
+
+          print(f"Found {len(issues)} issue(s) to process.")
+          print()
+
+          # ── Fetch monday users once for owner resolution ─────────────────
+
+          print("Fetching monday workspace users...")
+          users = monday_gql("query { users(kind: non_guests) { id name } }").get("data", {}).get("users", [])
+          monday_user_by_name = {u["name"]: u["id"] for u in users}
+
+          def resolve_owner_value(assignees):
+              persons = []
+              for a in assignees:
+                  login = a.get("login", "")
+                  display_name = next(
+                      (name for gh, name in USER_MAP.items() if gh.lower() == login.lower()),
+                      None
+                  )
+                  if not display_name:
+                      print(f"  Warning: GitHub login '{login}' not in user map — skipping for Owner")
+                      continue
+                  user_id = monday_user_by_name.get(display_name)
+                  if not user_id:
+                      print(f"  Warning: '{display_name}' not found in monday workspace — skipping for Owner")
+                      continue
+                  persons.append({"id": int(user_id), "kind": "person"})
+              return json.dumps({"personsAndTeams": persons})
+
+          # ── Process each issue ───────────────────────────────────────────
+
+          total_updated = 0
+          total_skipped = 0
+
+          for issue in issues:
+              issue_url    = issue["html_url"]
+              issue_title  = issue["title"]
+              state        = issue["state"]
+              assignees    = issue.get("assignees", [])
+              status_index = 1 if state == "closed" else 0
+
+              print(f"#{issue['number']} {issue_title[:60]}")
+              print(f"  State: {state} → Status '{STATUS_LABELS[status_index]}' | Assignees: {[a['login'] for a in assignees] or 'none'}")
+
+              status_value = json.dumps({"index": status_index})
+              owner_value  = resolve_owner_value(assignees)
+
+              matched_any = False
+              for board_id, link_col, status_col, owner_col, label in BOARDS:
+                  result = monday_gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": issue_url})
+                  items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
+                  if not items:
+                      continue
+                  matched_any = True
+                  for item in items:
+                      monday_gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": status_col, "val": status_value})
+                      monday_gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": owner_col,  "val": owner_value})
+                      print(f"  [{label}] ✓ '{item['name']}' (id={item['id']}) updated")
+                      total_updated += 1
+                  time.sleep(0.2)  # avoid monday rate limits
+
+              if not matched_any:
+                  print(f"  [skip] No monday items linked to this issue")
+                  total_skipped += 1
+
+              print()
+
+          print("=" * 60)
+          print(f"Done — {total_updated} monday record(s) updated, {total_skipped} issue(s) not linked in monday.")
+          PYEOF

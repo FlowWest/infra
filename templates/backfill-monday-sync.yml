@@ -1,0 +1,24 @@
+name: Backfill monday.com from GitHub issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    uses: FlowWest/infra/.github/workflows/backfill-monday-sync.yml@main
+    with:
+      repo: ${{ github.repository }}
+    secrets:
+      GITHUB_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
+      MONDAY_API_TOKEN:          ${{ secrets.MONDAY_API_TOKEN }}
+      MONDAY_BOARD_ID:           ${{ secrets.MONDAY_BOARD_ID }}
+      MONDAY_ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
+      MONDAY_ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
+      MONDAY_ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
+      MONDAY_SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
+      MONDAY_SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
+      MONDAY_SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
+      MONDAY_SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
