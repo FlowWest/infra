@@ -1,0 +1,326 @@
+name: Sync GitHub Issue → monday.com (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      issue_url:
+        description: "HTML URL of the GitHub issue"
+        required: true
+        type: string
+      event_action:
+        description: "issues event action: closed | reopened | labeled | unlabeled | assigned | unassigned"
+        required: true
+        type: string
+      label_name:
+        description: "Label name for labeled/unlabeled events (empty string otherwise)"
+        required: false
+        type: string
+        default: ""
+      assignee_login:
+        description: "GitHub username of the assignee for assigned/unassigned events"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      MONDAY_API_TOKEN:
+        required: true
+      MONDAY_BOARD_ID:
+        required: true
+      MONDAY_ITEM_LINK_COL:
+        required: true
+      MONDAY_ITEM_STATUS_COL:
+        required: true
+      MONDAY_ITEM_OWNER_COL:
+        required: true
+      MONDAY_SUBITEM_BOARD_ID:
+        required: true
+      MONDAY_SUBITEM_LINK_COL:
+        required: true
+      MONDAY_SUBITEM_STATUS_COL:
+        required: true
+      MONDAY_SUBITEM_OWNER_COL:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-to-monday:
+    runs-on: ubuntu-latest
+
+    env:
+      ITEM_BOARD_ID:      ${{ secrets.MONDAY_BOARD_ID }}
+      ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
+      ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
+      ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
+      SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
+      SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
+      SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
+      SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
+
+    steps:
+      - name: Resolve target status
+        id: status
+        env:
+          EVENT_ACTION: ${{ inputs.event_action }}
+          LABEL_NAME:   ${{ inputs.label_name }}
+        run: |
+          echo "Action: $EVENT_ACTION | Label: $LABEL_NAME"
+          case "$EVENT_ACTION" in
+            closed)
+              echo "index=1" >> "$GITHUB_OUTPUT"
+              ;;
+            reopened)
+              echo "index=0" >> "$GITHUB_OUTPUT"
+              ;;
+            labeled)
+              if [ "$LABEL_NAME" = "blocked" ]; then
+                echo "index=2" >> "$GITHUB_OUTPUT"
+              else
+                echo "index=skip" >> "$GITHUB_OUTPUT"
+                echo "Label '$LABEL_NAME' does not trigger a status change — skipping."
+              fi
+              ;;
+            unlabeled)
+              if [ "$LABEL_NAME" = "blocked" ]; then
+                echo "index=0" >> "$GITHUB_OUTPUT"
+              else
+                echo "index=skip" >> "$GITHUB_OUTPUT"
+                echo "Label '$LABEL_NAME' does not trigger a status change — skipping."
+              fi
+              ;;
+            *)
+              echo "index=skip" >> "$GITHUB_OUTPUT"
+              echo "Action '$EVENT_ACTION' does not trigger a status change — skipping."
+              ;;
+          esac
+
+      - name: Update monday status
+        if: steps.status.outputs.index != 'skip'
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          ISSUE_URL:        ${{ inputs.issue_url }}
+          STATUS_INDEX:     ${{ steps.status.outputs.index }}
+          EVENT_ACTION:     ${{ inputs.event_action }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, sys
+          import urllib.request, urllib.error
+
+          TOKEN        = os.environ["MONDAY_API_TOKEN"]
+          ISSUE_URL    = os.environ["ISSUE_URL"]
+          STATUS_INDEX = int(os.environ["STATUS_INDEX"])
+          EVENT_ACTION = os.environ["EVENT_ACTION"]
+
+          BOARDS = [
+              (os.environ["ITEM_BOARD_ID"],    os.environ["ITEM_LINK_COL"],    os.environ["ITEM_STATUS_COL"],    "items"),
+              (os.environ["SUBITEM_BOARD_ID"], os.environ["SUBITEM_LINK_COL"], os.environ["SUBITEM_STATUS_COL"], "subitems"),
+          ]
+
+          STATUS_LABELS = {0: "In Progress", 1: "Done", 2: "Stuck"}
+          print(f"Issue : {ISSUE_URL}")
+          print(f"Action: {EVENT_ACTION} → Status '{STATUS_LABELS.get(STATUS_INDEX, STATUS_INDEX)}'")
+
+          ENDPOINT = "https://api.monday.com/v2"
+          HEADERS  = {
+              "Content-Type": "application/json",
+              "Authorization": TOKEN,
+              "API-Version": "2024-10",
+          }
+          TIMEOUT = 30  # seconds
+
+          def gql(query, variables=None):
+              payload = json.dumps({"query": query, "variables": variables or {}}).encode()
+              req = urllib.request.Request(ENDPOINT, data=payload, headers=HEADERS, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                      result = json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Error: monday API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+              except urllib.error.URLError as e:
+                  print(f"Error: could not reach monday API: {e.reason}", file=sys.stderr)
+                  sys.exit(1)
+              except TimeoutError:
+                  print(f"Error: monday API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+              if "errors" in result:
+                  print(f"Error: monday API returned GraphQL errors: {result['errors']}", file=sys.stderr)
+                  print(f"       Query variables: {variables}", file=sys.stderr)
+                  sys.exit(1)
+              return result
+
+          SEARCH_QUERY = """
+          query ($boardId: ID!, $colId: String!, $val: String!) {
+            items_page_by_column_values(
+              board_id: $boardId
+              limit: 20
+              columns: [{ column_id: $colId, column_values: [$val] }]
+            ) { items { id name } }
+          }
+          """
+
+          UPDATE_MUTATION = """
+          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $val: JSON!) {
+            change_column_value(
+              item_id: $itemId board_id: $boardId column_id: $colId value: $val
+            ) { id }
+          }
+          """
+
+          status_value = json.dumps({"index": STATUS_INDEX})
+          updated = 0
+
+          for board_id, link_col, status_col, label in BOARDS:
+              print(f"[{label}] Searching board {board_id} for issue URL...")
+              result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
+              items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
+              if not items:
+                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID secret is wrong (column ID used: {link_col})")
+                  continue
+              for item in items:
+                  gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": status_col, "val": status_value})
+                  print(f"[{label}] ✓ '{item['name']}' (id={item['id']}) → status '{STATUS_LABELS.get(STATUS_INDEX, STATUS_INDEX)}'")
+                  updated += 1
+
+          if updated == 0:
+              print("Warning: no monday records were updated. Check that issue URLs are correctly pasted into the GitHub Issue link column.")
+          else:
+              print(f"Done — {updated} record(s) updated.")
+          PYEOF
+
+      - name: Update monday owner
+        if: inputs.event_action == 'assigned' || inputs.event_action == 'unassigned'
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          ISSUE_URL:        ${{ inputs.issue_url }}
+          EVENT_ACTION:     ${{ inputs.event_action }}
+          ASSIGNEE_LOGIN:   ${{ inputs.assignee_login }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, sys
+          import urllib.request, urllib.error
+
+          TOKEN          = os.environ["MONDAY_API_TOKEN"]
+          ISSUE_URL      = os.environ["ISSUE_URL"]
+          EVENT_ACTION   = os.environ["EVENT_ACTION"]
+          ASSIGNEE_LOGIN = os.environ["ASSIGNEE_LOGIN"]
+
+          BOARDS = [
+              (os.environ["ITEM_BOARD_ID"],    os.environ["ITEM_LINK_COL"],    os.environ["ITEM_OWNER_COL"],    "items"),
+              (os.environ["SUBITEM_BOARD_ID"], os.environ["SUBITEM_LINK_COL"], os.environ["SUBITEM_OWNER_COL"], "subitems"),
+          ]
+
+          print(f"Issue    : {ISSUE_URL}")
+          print(f"Action   : {EVENT_ACTION}")
+          print(f"Assignee : {ASSIGNEE_LOGIN or '(none)'}")
+
+          # FlowWest team: GitHub login → monday display name.
+          # Update this when team members join or leave.
+          user_map = {
+              "thesadie":       "Sadie Gill",
+              "ergz":           "Emanuel Rodriguez",
+              "alvizek":        "Ashley Vizek",
+              "B-yunes":        "Badhia Yunes Katz",
+              "catarfish":      "Catarina Pien",
+              "ctennerFW":      "Cameron Tenner",
+              "ErinCain":       "Erin Cain",
+              "InigoP":         "Inigo Peng",
+              "JordanHoang":    "Jordan Hoang",
+              "liz-fw":         "Liz Stebbins",
+              "MaddeeRubenson": "Maddee Rubenson",
+              "skylerlewis":    "Skyler Lewis",
+              "wdwiii":         "Willie Whitfield",
+          }
+
+          login_lower = ASSIGNEE_LOGIN.lower()
+          monday_display_name = next(
+              (name for login, name in user_map.items() if login.lower() == login_lower),
+              None
+          )
+
+          if not monday_display_name:
+              print(f"Warning: GitHub login '{ASSIGNEE_LOGIN}' is not in the user map in FlowWest/infra. Add them to sync Owner updates.")
+              sys.exit(0)
+
+          ENDPOINT = "https://api.monday.com/v2"
+          HEADERS  = {
+              "Content-Type": "application/json",
+              "Authorization": TOKEN,
+              "API-Version": "2024-10",
+          }
+          TIMEOUT = 30  # seconds
+
+          def gql(query, variables=None):
+              payload = json.dumps({"query": query, "variables": variables or {}}).encode()
+              req = urllib.request.Request(ENDPOINT, data=payload, headers=HEADERS, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                      result = json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print(f"Error: monday API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+                  sys.exit(1)
+              except urllib.error.URLError as e:
+                  print(f"Error: could not reach monday API: {e.reason}", file=sys.stderr)
+                  sys.exit(1)
+              except TimeoutError:
+                  print(f"Error: monday API request timed out after {TIMEOUT}s", file=sys.stderr)
+                  sys.exit(1)
+              if "errors" in result:
+                  print(f"Error: monday API returned GraphQL errors: {result['errors']}", file=sys.stderr)
+                  print(f"       Query variables: {variables}", file=sys.stderr)
+                  sys.exit(1)
+              return result
+
+          users = gql("query { users(kind: non_guests) { id name } }").get("data", {}).get("users", [])
+          monday_user_id = next((u["id"] for u in users if u.get("name") == monday_display_name), None)
+
+          if not monday_user_id:
+              print(f"Warning: '{monday_display_name}' is in the user map but was not found in the monday workspace. Check that they have been invited to monday.")
+              sys.exit(0)
+
+          print(f"Matched  : GitHub '{ASSIGNEE_LOGIN}' → monday '{monday_display_name}' (id={monday_user_id})")
+
+          if EVENT_ACTION == "unassigned":
+              owner_value = json.dumps({"personsAndTeams": []})
+          else:
+              owner_value = json.dumps({"personsAndTeams": [{"id": int(monday_user_id), "kind": "person"}]})
+
+          SEARCH_QUERY = """
+          query ($boardId: ID!, $colId: String!, $val: String!) {
+            items_page_by_column_values(
+              board_id: $boardId
+              limit: 20
+              columns: [{ column_id: $colId, column_values: [$val] }]
+            ) { items { id name } }
+          }
+          """
+
+          UPDATE_MUTATION = """
+          mutation ($itemId: ID!, $boardId: ID!, $colId: String!, $val: JSON!) {
+            change_column_value(
+              item_id: $itemId board_id: $boardId column_id: $colId value: $val
+            ) { id }
+          }
+          """
+
+          updated = 0
+
+          for board_id, link_col, owner_col, label in BOARDS:
+              print(f"[{label}] Searching board {board_id} for issue URL...")
+              result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
+              items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
+              if not items:
+                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID secret is wrong (column ID used: {link_col})")
+                  continue
+              for item in items:
+                  gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": owner_col, "val": owner_value})
+                  action = "cleared" if EVENT_ACTION == "unassigned" else f"set to '{monday_display_name}'"
+                  print(f"[{label}] ✓ '{item['name']}' (id={item['id']}) owner {action}")
+                  updated += 1
+
+          if updated == 0:
+              print("Warning: no monday records were updated. Check that issue URLs are correctly pasted into the GitHub Issue link column.")
+          else:
+              print(f"Done — {updated} record(s) updated.")
+          PYEOF
