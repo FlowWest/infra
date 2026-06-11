@@ -30,12 +30,6 @@ Syncs GitHub issue lifecycle events to a monday.com board. Handles status and ow
 
 The mapping of GitHub logins to monday display names is in the `user_map` dict in `.github/workflows/sync-issue-to-monday.yml`. Update it when team members join or leave — one change here applies to all connected repos.
 
-**Required secret on this repo**
-
-| Secret | Description |
-|---|---|
-| `MONDAY_API_TOKEN` | Personal API token for a monday bot user with access to all FlowWest project boards |
-
 ---
 
 ## Setting up a new project repo
