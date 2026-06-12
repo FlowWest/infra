@@ -111,7 +111,7 @@ MONDAY_SUBITEM_STATUS_COL=status
 MONDAY_SUBITEM_OWNER_COL=person
 ```
 
-> **Do not commit this file.** Add `*.env` to `.gitignore` in the project repo. The values identify your board structure and should stay out of version control.
+> Note: `MONDAY_API_TOKEN` is intentionally excluded from the `.env` file — credentials must be set as secrets, not variables. Variables are visible to all repo members and are not suitable for tokens or API keys.
 
 ### 3. Finding your IDs
 
