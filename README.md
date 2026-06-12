@@ -56,13 +56,20 @@ templates/backfill-monday-sync.yml   →   .github/workflows/backfill-monday-syn
 
 No edits to either file are needed.
 
-### 2. Add secrets to the project repo
+### 2. Add the secret and variables to the project repo
 
-Go to the project repo → Settings → Secrets and variables → Actions and add each of the following. These secrets are shared by both workflows — set them once and both work.
+Both workflows share the same values — set them once and both work.
+
+**Secret:**
 
 | Secret | Description |
 |---|---|
 | `MONDAY_API_TOKEN` | Personal API token for the monday bot user |
+
+**Variables:**
+
+| Variable | Description |
+|---|---|
 | `MONDAY_BOARD_ID` | ID of the main monday board for this project |
 | `MONDAY_ITEM_LINK_COL` | Column ID of the GitHub Issue link column on items |
 | `MONDAY_ITEM_STATUS_COL` | Column ID of the Status column on items |
@@ -71,6 +78,40 @@ Go to the project repo → Settings → Secrets and variables → Actions and ad
 | `MONDAY_SUBITEM_LINK_COL` | Column ID of the GitHub Issue link column on subitems |
 | `MONDAY_SUBITEM_STATUS_COL` | Column ID of the Status column on subitems |
 | `MONDAY_SUBITEM_OWNER_COL` | Column ID of the Owner column on subitems |
+
+**Option A — GitHub UI**
+
+Go to the project repo → Settings → Secrets and variables → Actions.
+
+- Secret: Secrets tab → New repository secret → add `MONDAY_API_TOKEN`
+- Variables: Variables tab → New repository variable → add each variable above
+
+**Option B — `gh` CLI (faster)**
+
+Create a `.env` file with all 8 variable values (see format below), then run:
+
+```bash
+# Set all variables at once from the .env file
+gh variable set --env-file monday.env --repo your-org/your-repo
+
+# Set the secret separately (gh secret set reads from stdin — avoids value in shell history)
+gh secret set MONDAY_API_TOKEN --repo your-org/your-repo
+```
+
+The `.env` file format — one `KEY=value` per line, no quotes needed:
+
+```
+MONDAY_BOARD_ID=18414974740
+MONDAY_ITEM_LINK_COL=link_mm41jw5g
+MONDAY_ITEM_STATUS_COL=color_mm3qjykx
+MONDAY_ITEM_OWNER_COL=multiple_person_mm3qka0s
+MONDAY_SUBITEM_BOARD_ID=18414974766
+MONDAY_SUBITEM_LINK_COL=link_mm411dje
+MONDAY_SUBITEM_STATUS_COL=status
+MONDAY_SUBITEM_OWNER_COL=person
+```
+
+> **Do not commit this file.** Add `*.env` to `.gitignore` in the project repo. The values identify your board structure and should stay out of version control.
 
 ### 3. Finding your IDs
 

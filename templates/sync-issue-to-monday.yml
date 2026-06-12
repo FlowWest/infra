@@ -15,13 +15,13 @@ jobs:
       event_action:   ${{ github.event.action }}
       label_name:     ${{ github.event.label.name || '' }}
       assignee_login: ${{ github.event.assignee.login || '' }}
+      board_id:           ${{ vars.MONDAY_BOARD_ID }}
+      item_link_col:      ${{ vars.MONDAY_ITEM_LINK_COL }}
+      item_status_col:    ${{ vars.MONDAY_ITEM_STATUS_COL }}
+      item_owner_col:     ${{ vars.MONDAY_ITEM_OWNER_COL }}
+      subitem_board_id:   ${{ vars.MONDAY_SUBITEM_BOARD_ID }}
+      subitem_link_col:   ${{ vars.MONDAY_SUBITEM_LINK_COL }}
+      subitem_status_col: ${{ vars.MONDAY_SUBITEM_STATUS_COL }}
+      subitem_owner_col:  ${{ vars.MONDAY_SUBITEM_OWNER_COL }}
     secrets:
-      MONDAY_API_TOKEN:          ${{ secrets.MONDAY_API_TOKEN }}
-      MONDAY_BOARD_ID:           ${{ secrets.MONDAY_BOARD_ID }}
-      MONDAY_ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
-      MONDAY_ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
-      MONDAY_ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
-      MONDAY_SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
-      MONDAY_SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
-      MONDAY_SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
-      MONDAY_SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
+      MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}

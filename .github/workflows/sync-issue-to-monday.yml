@@ -21,24 +21,40 @@ on:
         required: false
         type: string
         default: ""
+      board_id:
+        description: "monday board ID for main items"
+        required: true
+        type: string
+      item_link_col:
+        description: "Column ID of the GitHub Issue link column on items"
+        required: true
+        type: string
+      item_status_col:
+        description: "Column ID of the Status column on items"
+        required: true
+        type: string
+      item_owner_col:
+        description: "Column ID of the Owner column on items"
+        required: true
+        type: string
+      subitem_board_id:
+        description: "monday board ID for subitems"
+        required: true
+        type: string
+      subitem_link_col:
+        description: "Column ID of the GitHub Issue link column on subitems"
+        required: true
+        type: string
+      subitem_status_col:
+        description: "Column ID of the Status column on subitems"
+        required: true
+        type: string
+      subitem_owner_col:
+        description: "Column ID of the Owner column on subitems"
+        required: true
+        type: string
     secrets:
       MONDAY_API_TOKEN:
-        required: true
-      MONDAY_BOARD_ID:
-        required: true
-      MONDAY_ITEM_LINK_COL:
-        required: true
-      MONDAY_ITEM_STATUS_COL:
-        required: true
-      MONDAY_ITEM_OWNER_COL:
-        required: true
-      MONDAY_SUBITEM_BOARD_ID:
-        required: true
-      MONDAY_SUBITEM_LINK_COL:
-        required: true
-      MONDAY_SUBITEM_STATUS_COL:
-        required: true
-      MONDAY_SUBITEM_OWNER_COL:
         required: true
 
 permissions:
@@ -49,14 +65,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ITEM_BOARD_ID:      ${{ secrets.MONDAY_BOARD_ID }}
-      ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
-      ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
-      ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
-      SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
-      SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
-      SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
-      SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
+      ITEM_BOARD_ID:      ${{ inputs.board_id }}
+      ITEM_LINK_COL:      ${{ inputs.item_link_col }}
+      ITEM_STATUS_COL:    ${{ inputs.item_status_col }}
+      ITEM_OWNER_COL:     ${{ inputs.item_owner_col }}
+      SUBITEM_BOARD_ID:   ${{ inputs.subitem_board_id }}
+      SUBITEM_LINK_COL:   ${{ inputs.subitem_link_col }}
+      SUBITEM_STATUS_COL: ${{ inputs.subitem_status_col }}
+      SUBITEM_OWNER_COL:  ${{ inputs.subitem_owner_col }}
 
     steps:
       - name: Resolve target status
@@ -127,7 +143,7 @@ jobs:
               "Authorization": TOKEN,
               "API-Version": "2024-10",
           }
-          TIMEOUT = 30  # seconds
+          TIMEOUT = 30
 
           def gql(query, variables=None):
               payload = json.dumps({"query": query, "variables": variables or {}}).encode()
@@ -182,7 +198,7 @@ jobs:
               result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
               items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
               if not items:
-                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID secret is wrong (column ID used: {link_col})")
+                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID is wrong (column ID used: {link_col})")
                   continue
               for item in items:
                   gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": status_col, "val": status_value})
@@ -255,7 +271,7 @@ jobs:
               "Authorization": TOKEN,
               "API-Version": "2024-10",
           }
-          TIMEOUT = 30  # seconds
+          TIMEOUT = 30
 
           def gql(query, variables=None):
               payload = json.dumps({"query": query, "variables": variables or {}}).encode()
@@ -323,7 +339,7 @@ jobs:
               result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
               items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
               if not items:
-                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID secret is wrong (column ID used: {link_col})")
+                  print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID is wrong (column ID used: {link_col})")
                   continue
               for item in items:
                   gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": owner_col, "val": owner_value})
@@ -334,5 +350,5 @@ jobs:
           if updated == 0:
               print("Warning: no monday records were updated. Check that issue URLs are correctly pasted into the GitHub Issue link column.")
           else:
-              print(f"Done — {updated} record(s) updated.")
+              print(f"Done — {updated} owner(s) updated.")
           PYEOF

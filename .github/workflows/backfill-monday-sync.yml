@@ -7,26 +7,42 @@ on:
         description: "GitHub repo to read issues from (owner/repo)"
         required: true
         type: string
+      board_id:
+        description: "monday board ID for main items"
+        required: true
+        type: string
+      item_link_col:
+        description: "Column ID of the GitHub Issue link column on items"
+        required: true
+        type: string
+      item_status_col:
+        description: "Column ID of the Status column on items"
+        required: true
+        type: string
+      item_owner_col:
+        description: "Column ID of the Owner column on items"
+        required: true
+        type: string
+      subitem_board_id:
+        description: "monday board ID for subitems"
+        required: true
+        type: string
+      subitem_link_col:
+        description: "Column ID of the GitHub Issue link column on subitems"
+        required: true
+        type: string
+      subitem_status_col:
+        description: "Column ID of the Status column on subitems"
+        required: true
+        type: string
+      subitem_owner_col:
+        description: "Column ID of the Owner column on subitems"
+        required: true
+        type: string
     secrets:
       GITHUB_TOKEN:
         required: true
       MONDAY_API_TOKEN:
-        required: true
-      MONDAY_BOARD_ID:
-        required: true
-      MONDAY_ITEM_LINK_COL:
-        required: true
-      MONDAY_ITEM_STATUS_COL:
-        required: true
-      MONDAY_ITEM_OWNER_COL:
-        required: true
-      MONDAY_SUBITEM_BOARD_ID:
-        required: true
-      MONDAY_SUBITEM_LINK_COL:
-        required: true
-      MONDAY_SUBITEM_STATUS_COL:
-        required: true
-      MONDAY_SUBITEM_OWNER_COL:
         required: true
 
 permissions:
@@ -37,14 +53,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ITEM_BOARD_ID:      ${{ secrets.MONDAY_BOARD_ID }}
-      ITEM_LINK_COL:      ${{ secrets.MONDAY_ITEM_LINK_COL }}
-      ITEM_STATUS_COL:    ${{ secrets.MONDAY_ITEM_STATUS_COL }}
-      ITEM_OWNER_COL:     ${{ secrets.MONDAY_ITEM_OWNER_COL }}
-      SUBITEM_BOARD_ID:   ${{ secrets.MONDAY_SUBITEM_BOARD_ID }}
-      SUBITEM_LINK_COL:   ${{ secrets.MONDAY_SUBITEM_LINK_COL }}
-      SUBITEM_STATUS_COL: ${{ secrets.MONDAY_SUBITEM_STATUS_COL }}
-      SUBITEM_OWNER_COL:  ${{ secrets.MONDAY_SUBITEM_OWNER_COL }}
+      ITEM_BOARD_ID:      ${{ inputs.board_id }}
+      ITEM_LINK_COL:      ${{ inputs.item_link_col }}
+      ITEM_STATUS_COL:    ${{ inputs.item_status_col }}
+      ITEM_OWNER_COL:     ${{ inputs.item_owner_col }}
+      SUBITEM_BOARD_ID:   ${{ inputs.subitem_board_id }}
+      SUBITEM_LINK_COL:   ${{ inputs.subitem_link_col }}
+      SUBITEM_STATUS_COL: ${{ inputs.subitem_status_col }}
+      SUBITEM_OWNER_COL:  ${{ inputs.subitem_owner_col }}
 
     steps:
       - name: Backfill monday from GitHub issue state
