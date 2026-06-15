@@ -170,11 +170,14 @@ jobs:
 
           SEARCH_QUERY = """
           query ($boardId: ID!, $colId: String!, $val: String!) {
-            items_page_by_column_values(
-              board_id: $boardId
-              limit: 20
-              columns: [{ column_id: $colId, column_values: [$val] }]
-            ) { items { id name } }
+            boards(ids: [$boardId]) {
+              items_page(
+                limit: 20
+                query_params: {
+                  rules: [{ column_id: $colId, compare_value: [$val], operator: contains_text }]
+                }
+              ) { items { id name } }
+            }
           }
           """
 
@@ -251,7 +254,8 @@ jobs:
               matched_any = False
               for board_id, link_col, status_col, owner_col, label in BOARDS:
                   result = monday_gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": issue_url})
-                  items  = result.get("data", {}).get("items_page_by_column_values", {}).get("items", [])
+                  boards = result.get("data", {}).get("boards", [])
+                  items  = boards[0].get("items_page", {}).get("items", []) if boards else []
                   if not items:
                       continue
                   matched_any = True
