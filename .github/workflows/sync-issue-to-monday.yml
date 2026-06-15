@@ -172,15 +172,17 @@ jobs:
                   sys.exit(1)
               return result
 
-          SEARCH_QUERY = """
-          query ($boardId: ID!, $colId: String!, $val: String!) {
+          ALL_ITEMS_QUERY = """
+          query ($boardId: ID!, $linkColId: String!, $cursor: String) {
             boards(ids: [$boardId]) {
-              items_page(
-                limit: 20
-                query_params: {
-                  rules: [{ column_id: $colId, compare_value: [$val], operator: contains_text }]
+              items_page(limit: 100, cursor: $cursor) {
+                cursor
+                items {
+                  id
+                  name
+                  column_values(ids: [$linkColId]) { text }
                 }
-              ) { items { id name } }
+              }
             }
           }
           """
@@ -193,14 +195,35 @@ jobs:
           }
           """
 
+          import re
+
+          def find_items_for_url(board_id, link_col, issue_url):
+              matched = []
+              cursor = None
+              while True:
+                  variables = {"boardId": board_id, "linkColId": link_col}
+                  if cursor:
+                      variables["cursor"] = cursor
+                  result = gql(ALL_ITEMS_QUERY, variables)
+                  page = result.get("data", {}).get("boards", [{}])[0].get("items_page", {})
+                  for item in page.get("items", []):
+                      col_vals = item.get("column_values", [])
+                      link_text = col_vals[0].get("text", "") if col_vals else ""
+                      urls = re.findall(r'https?://\S+', link_text)
+                      if any(u.rstrip('/') == issue_url for u in urls):
+                          matched.append(item)
+                  cursor = page.get("cursor")
+                  if not cursor:
+                      break
+              return matched
+
           status_value = json.dumps({"index": STATUS_INDEX})
+          issue_url = ISSUE_URL.rstrip('/')
           updated = 0
 
           for board_id, link_col, status_col, label in BOARDS:
               print(f"[{label}] Searching board {board_id} for issue URL...")
-              result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
-              boards = result.get("data", {}).get("boards", [])
-              items  = boards[0].get("items_page", {}).get("items", []) if boards else []
+              items = find_items_for_url(board_id, link_col, issue_url)
               if not items:
                   print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID is wrong (column ID used: {link_col})")
                   continue
@@ -219,31 +242,30 @@ jobs:
         if: inputs.event_action == 'assigned' || inputs.event_action == 'unassigned'
         env:
           MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          GITHUB_TOKEN:     ${{ github.token }}
           ISSUE_URL:        ${{ inputs.issue_url }}
           EVENT_ACTION:     ${{ inputs.event_action }}
-          ASSIGNEE_LOGIN:   ${{ inputs.assignee_login }}
         run: |
           python3 << 'PYEOF'
-          import os, json, sys
+          import os, json, sys, re
           import urllib.request, urllib.error
 
-          TOKEN          = os.environ["MONDAY_API_TOKEN"]
-          ISSUE_URL      = os.environ["ISSUE_URL"]
-          EVENT_ACTION   = os.environ["EVENT_ACTION"]
-          ASSIGNEE_LOGIN = os.environ["ASSIGNEE_LOGIN"]
+          TOKEN        = os.environ["MONDAY_API_TOKEN"]
+          GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+          ISSUE_URL    = os.environ["ISSUE_URL"]
+          EVENT_ACTION = os.environ["EVENT_ACTION"]
 
           BOARDS = [
               (os.environ["ITEM_BOARD_ID"],    os.environ["ITEM_LINK_COL"],    os.environ["ITEM_OWNER_COL"],    "items"),
               (os.environ["SUBITEM_BOARD_ID"], os.environ["SUBITEM_LINK_COL"], os.environ["SUBITEM_OWNER_COL"], "subitems"),
           ]
 
-          print(f"Issue    : {ISSUE_URL}")
-          print(f"Action   : {EVENT_ACTION}")
-          print(f"Assignee : {ASSIGNEE_LOGIN or '(none)'}")
+          print(f"Issue : {ISSUE_URL}")
+          print(f"Action: {EVENT_ACTION}")
 
           # FlowWest team: GitHub login → monday display name.
           # Update this when team members join or leave.
-          user_map = {
+          USER_MAP = {
               "thesadie":       "Sadie Gill",
               "ergz":           "Emanuel Rodriguez",
               "alvizek":        "Ashley Vizek",
@@ -259,15 +281,34 @@ jobs:
               "wdwiii":         "Willie Whitfield",
           }
 
-          login_lower = ASSIGNEE_LOGIN.lower()
-          monday_display_name = next(
-              (name for login, name in user_map.items() if login.lower() == login_lower),
-              None
-          )
+          TIMEOUT = 30
 
-          if not monday_display_name:
-              print(f"Warning: GitHub login '{ASSIGNEE_LOGIN}' is not in the user map in FlowWest/infra. Add them to sync Owner updates.")
-              sys.exit(0)
+          # ── Fetch current assignees from GitHub ──────────────────────────
+          # Parse repo + issue number from the issue URL
+          m = re.match(r'https://github\.com/([^/]+/[^/]+)/issues/(\d+)', ISSUE_URL)
+          if not m:
+              print(f"Error: could not parse repo/issue from URL: {ISSUE_URL}", file=sys.stderr)
+              sys.exit(1)
+          repo, issue_number = m.group(1), m.group(2)
+
+          api_url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
+          req = urllib.request.Request(api_url, headers={
+              "Authorization": f"Bearer {GITHUB_TOKEN}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          try:
+              with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                  issue_data = json.loads(r.read())
+          except urllib.error.HTTPError as e:
+              print(f"Error: GitHub API returned HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+              sys.exit(1)
+          except urllib.error.URLError as e:
+              print(f"Error: could not reach GitHub API: {e.reason}", file=sys.stderr)
+              sys.exit(1)
+
+          current_assignees = [a["login"] for a in issue_data.get("assignees", [])]
+          print(f"Current assignees: {current_assignees or '(none)'}")
 
           ENDPOINT = "https://api.monday.com/v2"
           HEADERS  = {
@@ -275,7 +316,6 @@ jobs:
               "Authorization": TOKEN,
               "API-Version": "2024-10",
           }
-          TIMEOUT = 30
 
           def gql(query, variables=None):
               payload = json.dumps({"query": query, "variables": variables or {}}).encode()
@@ -304,29 +344,39 @@ jobs:
                   sys.exit(1)
               return result
 
-          users = gql("query { users(kind: non_guests) { id name } }").get("data", {}).get("users", [])
-          monday_user_id = next((u["id"] for u in users if u.get("name") == monday_display_name), None)
+          # ── Resolve all current assignees to monday user IDs ─────────────
+          monday_users = gql("query { users(kind: non_guests) { id name } }").get("data", {}).get("users", [])
+          monday_user_by_name = {u["name"]: u["id"] for u in monday_users}
 
-          if not monday_user_id:
-              print(f"Warning: '{monday_display_name}' is in the user map but was not found in the monday workspace. Check that they have been invited to monday.")
-              sys.exit(0)
+          persons = []
+          for login in current_assignees:
+              display_name = next(
+                  (name for gh, name in USER_MAP.items() if gh.lower() == login.lower()),
+                  None
+              )
+              if not display_name:
+                  print(f"  Warning: GitHub login '{login}' not in user map — skipping for Owner")
+                  continue
+              user_id = monday_user_by_name.get(display_name)
+              if not user_id:
+                  print(f"  Warning: '{display_name}' not found in monday workspace — skipping for Owner")
+                  continue
+              persons.append({"id": int(user_id), "kind": "person"})
+              print(f"  Matched: '{login}' → '{display_name}' (id={user_id})")
 
-          print(f"Matched  : GitHub '{ASSIGNEE_LOGIN}' → monday '{monday_display_name}' (id={monday_user_id})")
+          owner_value = json.dumps({"personsAndTeams": persons})
 
-          if EVENT_ACTION == "unassigned":
-              owner_value = json.dumps({"personsAndTeams": []})
-          else:
-              owner_value = json.dumps({"personsAndTeams": [{"id": int(monday_user_id), "kind": "person"}]})
-
-          SEARCH_QUERY = """
-          query ($boardId: ID!, $colId: String!, $val: String!) {
+          ALL_ITEMS_QUERY = """
+          query ($boardId: ID!, $linkColId: String!, $cursor: String) {
             boards(ids: [$boardId]) {
-              items_page(
-                limit: 20
-                query_params: {
-                  rules: [{ column_id: $colId, compare_value: [$val], operator: contains_text }]
+              items_page(limit: 100, cursor: $cursor) {
+                cursor
+                items {
+                  id
+                  name
+                  column_values(ids: [$linkColId]) { text }
                 }
-              ) { items { id name } }
+              }
             }
           }
           """
@@ -339,20 +389,41 @@ jobs:
           }
           """
 
+          import re
+
+          def find_items_for_url(board_id, link_col, issue_url):
+              matched = []
+              cursor = None
+              while True:
+                  variables = {"boardId": board_id, "linkColId": link_col}
+                  if cursor:
+                      variables["cursor"] = cursor
+                  result = gql(ALL_ITEMS_QUERY, variables)
+                  page = result.get("data", {}).get("boards", [{}])[0].get("items_page", {})
+                  for item in page.get("items", []):
+                      col_vals = item.get("column_values", [])
+                      link_text = col_vals[0].get("text", "") if col_vals else ""
+                      urls = re.findall(r'https?://\S+', link_text)
+                      if any(u.rstrip('/') == issue_url for u in urls):
+                          matched.append(item)
+                  cursor = page.get("cursor")
+                  if not cursor:
+                      break
+              return matched
+
+          issue_url = ISSUE_URL.rstrip('/')
           updated = 0
 
           for board_id, link_col, owner_col, label in BOARDS:
               print(f"[{label}] Searching board {board_id} for issue URL...")
-              result = gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": ISSUE_URL})
-              boards = result.get("data", {}).get("boards", [])
-              items  = boards[0].get("items_page", {}).get("items", []) if boards else []
+              items = find_items_for_url(board_id, link_col, issue_url)
               if not items:
                   print(f"[{label}] No items matched — either the URL hasn't been pasted into the GitHub Issue column, or the column ID is wrong (column ID used: {link_col})")
                   continue
               for item in items:
                   gql(UPDATE_MUTATION, {"itemId": item["id"], "boardId": board_id, "colId": owner_col, "val": owner_value})
-                  action = "cleared" if EVENT_ACTION == "unassigned" else f"set to '{monday_display_name}'"
-                  print(f"[{label}] ✓ '{item['name']}' (id={item['id']}) owner {action}")
+                  owners_desc = ", ".join(f"'{p['id']}'" for p in persons) if persons else "cleared"
+                  print(f"[{label}] ✓ '{item['name']}' (id={item['id']}) owner → {owners_desc}")
                   updated += 1
 
           if updated == 0:

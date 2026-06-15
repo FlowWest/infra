@@ -168,15 +168,17 @@ jobs:
                   sys.exit(1)
               return result
 
-          SEARCH_QUERY = """
-          query ($boardId: ID!, $colId: String!, $val: String!) {
+          ALL_ITEMS_QUERY = """
+          query ($boardId: ID!, $linkColId: String!, $cursor: String) {
             boards(ids: [$boardId]) {
-              items_page(
-                limit: 20
-                query_params: {
-                  rules: [{ column_id: $colId, compare_value: [$val], operator: contains_text }]
+              items_page(limit: 100, cursor: $cursor) {
+                cursor
+                items {
+                  id
+                  name
+                  column_values(ids: [$linkColId]) { text }
                 }
-              ) { items { id name } }
+              }
             }
           }
           """
@@ -188,6 +190,30 @@ jobs:
             ) { id }
           }
           """
+
+          import re
+
+          def fetch_monday_items(board_id, link_col):
+              """Fetch all items from a board, returning a dict of issue_url -> [(item_id, name)]."""
+              url_map = {}
+              cursor = None
+              while True:
+                  variables = {"boardId": board_id, "linkColId": link_col}
+                  if cursor:
+                      variables["cursor"] = cursor
+                  result = monday_gql(ALL_ITEMS_QUERY, variables)
+                  page = result.get("data", {}).get("boards", [{}])[0].get("items_page", {})
+                  for item in page.get("items", []):
+                      col_vals = item.get("column_values", [])
+                      link_text = col_vals[0].get("text", "") if col_vals else ""
+                      urls = re.findall(r'https?://\S+', link_text)
+                      for u in urls:
+                          u = u.rstrip('/')
+                          url_map.setdefault(u, []).append({"id": item["id"], "name": item["name"]})
+                  cursor = page.get("cursor")
+                  if not cursor:
+                      break
+              return url_map
 
           # ── Fetch all GitHub issues (paginated, excluding PRs) ────────────
 
@@ -207,6 +233,16 @@ jobs:
               time.sleep(0.5)  # be polite to the API
 
           print(f"Found {len(issues)} issue(s) to process.")
+          print()
+
+          # ── Fetch all monday items upfront (Link columns can't be filtered via API) ──
+
+          print("Fetching monday items...")
+          board_url_maps = {}
+          for board_id, link_col, status_col, owner_col, label in BOARDS:
+              url_map = fetch_monday_items(board_id, link_col)
+              board_url_maps[(board_id, label)] = (url_map, status_col, owner_col)
+              print(f"  {label}: {sum(len(v) for v in url_map.values())} linked item(s) found")
           print()
 
           # ── Fetch monday users once for owner resolution ─────────────────
@@ -239,7 +275,7 @@ jobs:
           total_skipped = 0
 
           for issue in issues:
-              issue_url    = issue["html_url"]
+              issue_url    = issue["html_url"].rstrip('/')
               issue_title  = issue["title"]
               state        = issue["state"]
               assignees    = issue.get("assignees", [])
@@ -252,10 +288,8 @@ jobs:
               owner_value  = resolve_owner_value(assignees)
 
               matched_any = False
-              for board_id, link_col, status_col, owner_col, label in BOARDS:
-                  result = monday_gql(SEARCH_QUERY, {"boardId": board_id, "colId": link_col, "val": issue_url})
-                  boards = result.get("data", {}).get("boards", [])
-                  items  = boards[0].get("items_page", {}).get("items", []) if boards else []
+              for (board_id, label), (url_map, status_col, owner_col) in board_url_maps.items():
+                  items = url_map.get(issue_url, [])
                   if not items:
                       continue
                   matched_any = True
