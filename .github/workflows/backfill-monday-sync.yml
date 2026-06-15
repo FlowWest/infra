@@ -40,8 +40,6 @@ on:
         required: true
         type: string
     secrets:
-      GITHUB_TOKEN:
-        required: true
       MONDAY_API_TOKEN:
         required: true
 
@@ -65,7 +63,7 @@ jobs:
     steps:
       - name: Backfill monday from GitHub issue state
         env:
-          GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN:     ${{ github.token }}
           MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
           REPO:             ${{ inputs.repo }}
         run: |
