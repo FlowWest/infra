@@ -1,8 +1,8 @@
 # FlowWest Template Board Schema
 
-Template board URL: `https://flowwest-force.monday.com/boards/18414974740`
-Template board ID: `18414974740`
-Workspace: Engineering & Planning (id: `1369072`)
+Template URL: `https://flowwest-force.monday.com/template_center/template/22748268`
+Template ID: `22748268`
+Workspace: Data (id: `1366388`)
 Subitem board ID: `18414974766`
 
 ## Main item columns
@@ -64,19 +64,19 @@ These env var names are what the caller workflow templates expect. After creatin
 {"index": 0}
 ```
 
-## `duplicate_board` GraphQL mutation
+## `create_board` from template mutation
 
 ```graphql
 mutation {
-  duplicate_board(
-    board_id: 18414974740,
-    duplicate_type: duplicate_board_with_structure,
+  create_board(
     board_name: "PROJECT NAME HERE",
-    workspace_id: 1369072
+    board_kind: public,
+    workspace_id: 1366388,
+    template_id: 22748268
   ) {
-    board { id name url }
+    id name url
   }
 }
 ```
 
-Use this via the `all_monday_api` tool.
+Use this via the `all_monday_api` tool. After creation, call `get_board_info` to retrieve the actual column IDs — they may differ from the template values listed above.

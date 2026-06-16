@@ -29,7 +29,7 @@ After checking, give the user a one-line status per tool (✅ connected / ⚠️
 
 Ask all of the following in a single message to avoid unnecessary back-and-forth:
 
-- **Project name** — what should the board be called?
+- **Project name** — what should the board be called? The naming convention is a short descriptive name followed by the project number in parentheses, e.g. `Spring Run JPE (028-03)`. Ask for both the name and the project number if the user doesn't provide them.
 - **Existing Monday board?** — if yes, get the board URL or ID
 - **Existing GitHub repo(s)?** — if yes, get the full repo URL(s) (e.g. `https://github.com/FlowWest/my-repo`)
 - **Setup scope** — which phases are needed today? Full setup, just GitHub wiring, just issue linking, or just backfill?
@@ -48,15 +48,15 @@ Read `references/board-schema.md` now — you'll need the template board ID, wor
 
 Offer two options. The template duplicate is almost always the right choice because it carries over all the column structure the GitHub sync depends on, but some users prefer to start minimal.
 
-> **Option A — Duplicate template board**: Copies the FlowWest template including all columns, status labels, story points, and the Issue Progress rollup. Recommended.
+> **Option A — Create from template**: Creates a new board in the Data workspace from the FlowWest template center template, including all columns, status labels, story points, and the Issue Progress rollup. Recommended.
 >
 > **Option B — Blank board with required columns**: Creates an empty board and adds only the three columns the GitHub sync requires: GitHub Issue (link), Status, and Owner.
 
 ### 2b. Create the board
 
-**Option A:** Run the `duplicate_board` mutation via `all_monday_api`.
+**Option A:** Run the `create_board` mutation via `all_monday_api` using `template_id: 22748268` and `workspace_id: 1366388` (Data workspace). Use the full formatted name from Phase 1 (e.g. `Spring Run JPE (028-03)`) as the `board_name`. See `references/board-schema.md` for the exact mutation.
 
-**Option B:** Use `create_board` in workspace `1369072`. Then add a Subitems column first — Monday won't create the linked subitem board until you do. Once the subitem board exists, use `create_column` to add GitHub Issue (link), Status, and Owner columns on both the main board and the subitem board.
+**Option B:** Use `create_board` in workspace `1366388` (Data workspace) with the full formatted name (e.g. `Spring Run JPE (028-03)`). Then add a Subitems column first — Monday won't create the linked subitem board until you do. Once the subitem board exists, use `create_column` to add GitHub Issue (link), Status, and Owner columns on both the main board and the subitem board.
 
 After creation, call `get_board_info` on the new board to capture the actual column IDs and subitem board ID — these will differ from the template values and you'll need them in Phases 4 and 5.
 
