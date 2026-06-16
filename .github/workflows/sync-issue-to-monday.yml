@@ -210,7 +210,7 @@ jobs:
                       col_vals = item.get("column_values", [])
                       link_text = col_vals[0].get("text", "") if col_vals else ""
                       urls = re.findall(r'https?://\S+', link_text)
-                      if any(u.rstrip('/') == issue_url for u in urls):
+                      if any(u.rstrip('/').lower() == issue_url.lower() for u in urls):
                           matched.append(item)
                   cursor = page.get("cursor")
                   if not cursor:
@@ -404,7 +404,7 @@ jobs:
                       col_vals = item.get("column_values", [])
                       link_text = col_vals[0].get("text", "") if col_vals else ""
                       urls = re.findall(r'https?://\S+', link_text)
-                      if any(u.rstrip('/') == issue_url for u in urls):
+                      if any(u.rstrip('/').lower() == issue_url.lower() for u in urls):
                           matched.append(item)
                   cursor = page.get("cursor")
                   if not cursor:

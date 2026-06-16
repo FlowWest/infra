@@ -208,7 +208,7 @@ jobs:
                       link_text = col_vals[0].get("text", "") if col_vals else ""
                       urls = re.findall(r'https?://\S+', link_text)
                       for u in urls:
-                          u = u.rstrip('/')
+                          u = u.rstrip('/').lower()
                           url_map.setdefault(u, []).append({"id": item["id"], "name": item["name"]})
                   cursor = page.get("cursor")
                   if not cursor:
@@ -289,7 +289,7 @@ jobs:
 
               matched_any = False
               for (board_id, label), (url_map, status_col, owner_col) in board_url_maps.items():
-                  items = url_map.get(issue_url, [])
+                  items = url_map.get(issue_url.lower(), [])
                   if not items:
                       continue
                   matched_any = True
