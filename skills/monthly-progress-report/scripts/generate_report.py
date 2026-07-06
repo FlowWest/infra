@@ -7,11 +7,15 @@ Usage:
 Reads a JSON file describing the report contents and writes a .docx to the
 path specified by output_path in that file.
 
+Relative paths in the JSON are resolved against the skill root (the directory
+containing this scripts/ folder). So "references/flowwest_logo.jpg" always
+resolves correctly regardless of where you call the script from.
+
 Input JSON schema:
 {
-  "output_path": "/abs/path/to/output.docx",
-  "logo_path": "/abs/path/to/flowwest_logo.jpg",   // optional — skip logo if missing
-  "sig_path": "/abs/path/to/signature.png",         // optional — omit for no signature
+  "output_path": "../../June_2026_028-11_Progress_Report.docx",  // relative or absolute
+  "logo_path": "references/flowwest_logo.jpg",   // optional — skip logo if missing
+  "sig_path": "/abs/path/to/signature.png",       // optional — omit for no signature
   "recipient": {
     "name": "Kim Brewitt",
     "title": "Task Order Manager",
@@ -332,4 +336,12 @@ if __name__ == '__main__':
         sys.exit(1)
     with open(sys.argv[1]) as f:
         data = json.load(f)
+
+    # Resolve relative paths against the skill root (parent of scripts/)
+    skill_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for key in ('output_path', 'logo_path', 'sig_path'):
+        val = data.get(key)
+        if val and not os.path.isabs(val):
+            data[key] = os.path.join(skill_root, val)
+
     generate(data)

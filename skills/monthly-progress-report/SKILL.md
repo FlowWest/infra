@@ -1,96 +1,85 @@
 ---
 name: monthly-progress-report
-description: Generate a FlowWest monthly invoice progress report letter as a .docx file. Use this skill whenever a PM wants to create a monthly progress report, invoice summary letter, or billing period summary for a client. Triggers on phrases like "progress report", "monthly report", "invoice letter", "progress report letter", "billing summary", or when a user uploads a Factor time tracking PDF and draft invoice and wants to summarize the month's work. Always use this skill when the user mentions generating a report to accompany an invoice, even if they don't say "progress report" explicitly.
+description: >
+  Generate a FlowWest monthly invoice progress report letter as a .docx file.
+  Use this skill whenever a PM wants to create a monthly progress report, invoice
+  summary letter, or billing period summary for a client. Always use this skill
+  when a user uploads a Factor time tracking PDF, a draft invoice, or mentions
+  generating a report to accompany an invoice — even if they don't say "progress
+  report" explicitly. Triggers on: "progress report", "monthly report", "invoice
+  letter", "billing summary", "write up my hours", "summarize this month's work".
 ---
 
 # Monthly Progress Report Generator
 
-Generates a formal Word document (.docx) progress report letter for FlowWest project managers to accompany monthly client invoices. Follows the exact format and length of FlowWest's established letter template (simple letter style — not a memo).
-
-## What you'll produce
-
-A clean, concise .docx letter containing:
-- FlowWest logo at top
-- Recipient contact block + contract details
-- Date, salutation, 1–2 sentence intro
-- Optional deliverable status sentence
-- Task summary table (task number | plain-text description)
-- Merged "Budget and Schedule" row with remaining balance
-- Thank-you paragraph, sign-off
-
-The letter is intentionally brief. Descriptions are concise bullet items per task.
+Generates a formal Word document (.docx) progress report letter for FlowWest project managers to accompany monthly client invoices. Simple letter style — not a memo. Intentionally brief: 3–5 bullet items per task, plain language, no implementation details.
 
 ---
 
 ## Step 1: Gather inputs
 
-Tell the PM:
+Ask the PM for:
 
-> "I'll generate your monthly progress report letter. Please upload:
-> 1. **Factor time tracking report** — `time_tracking_details_MM_YYYY.pdf` (from Factor → Reports → Printable Reports → Time Detail for Export, filtered to the billing month and project)
-> 2. **Draft invoice PDF**
->
-> Also:
-> - **GitHub repos** *(optional)* — If this project has a GitHub repo, provide the repo(s) (e.g. `FlowWest/my-repo`) and a GitHub Personal Access Token (PAT) — a token from GitHub Settings → Developer settings → Personal access tokens, with `repo` scope. Commits will be used to enrich the work descriptions. Skip if not applicable.
-> - Were any deliverables **completed** this month, or are any **upcoming** next month? (Say 'none' to skip.)
-> - Confirm your **full name and title** for the sign-off (e.g., 'Sadie Gill, Principal Data Scientist').
-> - **Signature image:** Upload a `.png` or `.jpg` of your signature to include it in the sign-off. Skip to leave no gap between 'Sincerely,' and your name."
-
-After receiving these, proceed. Then — before generating the docx — confirm the recipient and show a draft of the work descriptions for PM review.
+1. **Factor time tracking report** (required) — `time_tracking_details_MM_YYYY.pdf`, exported from Factor → Reports → Printable Reports → Time Detail for Export, filtered to the billing month and project
+2. **Draft invoice PDF** (required)
+3. **GitHub repos** (optional) — repo(s) in `Owner/repo` format (e.g. `FlowWest/my-repo`) plus a GitHub Personal Access Token (PAT, from GitHub Settings → Developer settings → Personal access tokens with `repo` scope). Commits will enrich the work descriptions.
+4. **Deliverables** (optional) — any deliverables completed or due next month; say 'none' to skip
+5. **PM full name and title** — for the sign-off
+6. **Signature image** (optional) — upload a `.png` or `.jpg`; skip to have the name follow directly after "Sincerely,"
 
 ---
 
 ## Step 2: Parse the Factor PDF
 
-The Factor report has columns: `Date | Type | Number | Project Name | Client Name | Phase | Employee | Role | Hours | Value | Entry Description`
+The Factor report columns are: `Date | Type | Number | Project Name | Client Name | Phase | Employee | Role | Hours | Value | Entry Description`
 
-**Keep only `Type == "Project"` rows.** Exclude everything else: PTO, Holiday, Part-Time Staff Holiday, State Paid/Unpaid Family Leave, Unpaid Time Off, or any other non-project type.
+Keep only rows where `Type == "Project"` — discard PTO, Holiday, Part-Time Staff Holiday, leave types, and anything else non-project.
 
-**Group by top-level task** from the `Phase` column. The Phase looks like `"2 - Shiny Application Development/2.1 Document That Describes App Components & Functionality"` — take everything before the first `/`.
+Group by top-level task from the `Phase` column. Phase looks like `"2 - Shiny Application Development/2.1 Document..."` — take everything before the first `/`.
 
-For each top-level task, collect all the `Entry Description` values from its rows. These are the raw inputs for synthesis in Step 4.
-
-Tasks with no billable entries get: `No work completed under this task.` (italic in the final doc).
+Collect all `Entry Description` values per top-level task. These feed into Step 5 synthesis. Tasks with no billable rows will show "No work completed under this task." (italic) in the final document.
 
 ---
 
-## Step 2b: Fetch GitHub commits *(skip if no repos provided)*
+## Step 3: Fetch GitHub commits *(skip if no repos provided)*
 
-Use Python via bash. For each repo:
+For each repo, run a Python script via bash:
 
-1. Fetch the default branch name: `GET /repos/{owner}/{repo}`
-2. Fetch all branches: `GET /repos/{owner}/{repo}/branches?per_page=100`
-3. Pull commits from the default branch for the billing period: `GET /repos/{owner}/{repo}/commits?sha={default_branch}&since=...&until=...&per_page=100`
-4. For feature branches, use the compare endpoint to get only commits not yet in the default branch, then filter by date
-5. Auth header: `Authorization: Bearer <token>`
+1. Get the default branch: `GET https://api.github.com/repos/{owner}/{repo}`
+2. Get all branches: `GET https://api.github.com/repos/{owner}/{repo}/branches?per_page=100`
+3. Fetch commits on the default branch for the billing period using ISO 8601 dates from the invoice (e.g. `since=2026-06-01T00:00:00Z&until=2026-06-30T23:59:59Z`):
+   `GET https://api.github.com/repos/{owner}/{repo}/commits?sha={default_branch}&since=...&until=...&per_page=100`
+4. For each feature branch (anything other than the default, `staging`, `production`, `prod`, `build-staging`), get commits unique to that branch via the compare endpoint, then filter to the billing period by `commit.author.date`:
+   `GET https://api.github.com/repos/{owner}/{repo}/compare/{default_branch}...{feature_branch}`
+5. Add `Authorization: Bearer <token>` to every request. Skip branches returning 404 or 500.
 
-Strip merge commits. Deduplicate by SHA. The result is a flat list of commit messages per repo, used in Step 4.
+Strip any commit message starting with `"Merge pull request"` or `"Merge branch"`. Deduplicate by SHA. Output: a flat list of commit messages grouped by repo, used in Step 5.
 
 ---
 
-## Step 3: Parse the draft invoice PDF
+## Step 4: Parse the draft invoice PDF
 
 Extract:
-- **Candidate recipient**: from the `cc:` line (name and email). If only an email is present, derive the name from it or flag for PM confirmation.
+- **Recipient candidate**: the `cc:` line (name + email). If only an email, derive the name or flag for PM confirmation.
 - **Recipient org / address / phone / email**: from the "INVOICE FOR" block
-- **Project name**, **FlowWest project number** (e.g., "028-11")
+- **Project name**, **FlowWest project number** (e.g. `028-11`)
 - **Contract No.**, **TO No.**, **TO Name**
-- **Billing period** (e.g., "6/1/2026 to 6/30/2026") and **invoice date**
-- **Remaining balance**: the "Budget Remaining" total from the invoice summary row
-- **All top-level task names**: every top-level task row in the invoice table
+- **Billing period** and **invoice date**
+- **Remaining balance**: the "Budget Remaining" total
+- **All top-level task names** from the invoice table
 
 ---
 
-## Step 4: Synthesize work descriptions
+## Step 5: Synthesize work descriptions
 
-For each top-level task, write **3–5 concise bullet items** summarizing what was done. Past tense, plain language — outcomes and features, not implementation details.
+For each top-level task, write 3–5 concise bullet items. Past tense, plain language — describe outcomes and features, not implementation details (no file names, library names, or variable names).
 
-Use whatever sources are available:
+Draw from available sources:
 - **Factor only**: synthesize from the `Entry Description` values
-- **Factor + GitHub**: use both — Factor anchors which tasks had billable hours, commits enrich the narrative. Map commits to tasks by matching commit content to task names.
-- **No Factor entries for a task but relevant commits exist**: use commits rather than marking it "No work completed"
+- **Factor + GitHub**: Factor confirms which tasks had billable hours; commit messages enrich the narrative. Map commits to tasks by matching their content to task names.
+- **Task has commits but no Factor hours**: use commits rather than "No work completed"
 
-**Reference example:**
+Reference example:
 ```
 • Continued development and iterative review of the design document.
 • Database schema design and updates to support application data structures.
@@ -100,98 +89,78 @@ Use whatever sources are available:
 
 ---
 
-## Step 5: Confirm recipient + show draft for PM review
+## Step 6: Confirm recipient + PM review
 
-**First, confirm the recipient:**
-> "I'll address the letter to **[Candidate Name]** ([email]) at [org]. Is that correct, or is the Task Order Manager someone different? If different, provide their full name, title, org, address, phone, and email."
+Confirm the recipient first:
+> "I'll address the letter to **[Name]** ([email]) at [org]. Correct, or is there a different Task Order Manager?"
 
-**Then, show the draft work descriptions** and ask for feedback before generating the docx:
+Then show the draft and ask for feedback:
 
-> "Here's a draft of the work summary. Please review and let me know what to add, remove, or rephrase before I create the document.
->
-> ---
 > **Task 1 — Project Management**
-> • [line 1]
-> • [line 2]
+> • …
 >
-> **Task 2 — [Task Name]**
-> • [line 1]
-> • [line 2]
-> • [line 3]
+> **Task 2 — [Name]**
+> • …
 >
 > **Task 3 — Reporting**
 > No work completed under this task.
 >
 > **Budget and Schedule**
 > Remaining balance is $[amount]
-> ---"
 
-Wait for PM feedback. Apply any edits, then generate the docx.
+Wait for PM feedback. Apply edits, then proceed.
 
 ---
 
-## Step 6: Generate the .docx
+## Step 7: Generate the .docx
 
-Use the bundled script at `scripts/generate_report.py`. Construct a JSON input file from everything gathered above, then run the script.
+Use the bundled script at `scripts/generate_report.py` (path relative to the skill root — the directory containing this SKILL.md). Write the JSON input to a temp file and run:
 
+```bash
+python3 /path/to/skill-root/scripts/generate_report.py /tmp/report_input.json
+```
+
+JSON structure:
 ```json
 {
-  "output_path": "/abs/path/to/[Month]_[Year]_[ProjectNo]_Progress_Report.docx",
-  "logo_path": "/Users/sadiegill/Documents/infra/skills/monthly-progress-report/references/flowwest_logo.jpg",
-  "sig_path": "/path/to/uploaded/signature.png",
+  "output_path": "/abs/path/to/workspace/[Month]_[Year]_[ProjectNo]_Progress_Report.docx",
+  "logo_path": "references/flowwest_logo.jpg",
+  "sig_path": "/abs/path/to/uploaded/signature.png",
   "recipient": {
-    "name": "[Full Name]",
-    "title": "[Title]",
-    "org": "[Organization]",
-    "address": "[Street]",
-    "city_state_zip": "[City, State ZIP]",
-    "phone": "[Phone]",
-    "email": "[Email]"
+    "name": "",
+    "title": "",
+    "org": "",
+    "address": "",
+    "city_state_zip": "",
+    "phone": "",
+    "email": ""
   },
   "contract": {
-    "contract_no": "[Contract No.]",
-    "to_name": "[TO Name]",
-    "project_no": "[Project No.]"
+    "contract_no": "",
+    "to_name": "",
+    "project_no": ""
   },
   "date": "[Month Day, Year]",
   "intro": "Enclosed please find FlowWest's invoice for work completed by the project team on the [TO Name] through [Month Year].",
   "deliverable": null,
   "tasks": [
     { "num": "1", "name": "Project Management", "lines": ["bullet 1", "bullet 2"] },
-    { "num": "2", "name": "[Task Name]",         "lines": [] }
+    { "num": "2", "name": "[Task Name]", "lines": [] }
   ],
   "remaining_balance": "[amount]",
-  "pm_name": "[PM Full Name]",
-  "pm_title": "[PM Title]"
+  "pm_name": "",
+  "pm_title": ""
 }
 ```
 
-Omit `sig_path` (or set to `null`) if no signature was uploaded. The `deliverable` field takes a full sentence or `null`. Empty `lines` arrays produce an italic "No work completed" line.
-
-Run the script:
-```bash
-python3 scripts/generate_report.py /tmp/report_input.json
-```
-
----
-
-## Step 7: Deliver
-
-1. Save the .docx to the workspace folder as `[Month]_[Year]_[ProjectNumber]_Progress_Report.docx`
-2. Present with `present_files`
-3. Add: "This is a draft — review before sending."
+Notes:
+- `logo_path` is relative to the skill root and resolves automatically; if the file is missing the logo is silently skipped
+- Set `sig_path` to the uploaded file's absolute path, or omit/`null` for no signature
+- `deliverable` is a full sentence or `null`
+- Empty `lines` arrays produce italic "No work completed under this task."
 
 ---
 
-## Logo note
+## Step 8: Deliver
 
-The FlowWest logo is stored at:
-`/Users/sadiegill/Documents/infra/skills/monthly-progress-report/references/flowwest_logo.jpg`
-
-If that file doesn't exist when the skill runs, skip the logo silently, generate the document without it, and tell the PM: "Logo file not found at references/flowwest_logo.jpg — add it there to include it automatically in future runs."
-
----
-
-## Signature note
-
-Use the signature image only if the PM uploaded one in Step 1. Set `sig_path` to the uploaded file path, or `None` if they skipped it. No fallback — do not look anywhere else.
+Present the .docx with `present_files` and say: "This is a draft — review before sending."
