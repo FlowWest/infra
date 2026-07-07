@@ -61,12 +61,14 @@ Strip any commit message starting with `"Merge pull request"` or `"Merge branch"
 
 Extract:
 - **Recipient candidate**: the `cc:` line (name + email). If only an email, derive the name or flag for PM confirmation.
-- **Recipient org / address / phone / email**: from the "INVOICE FOR" block
+- **Recipient org / address / phone / email**: from the "INVOICE FOR" block. These fields are often partially or fully absent — some invoices only list a name and email. Set any missing fields to `""` (empty string); do not invent or guess values. The script will silently skip empty fields when rendering the address block.
 - **Project name**, **FlowWest project number** (e.g. `028-11`)
 - **Contract No.**, **TO No.**, **TO Name**
 - **Billing period** and **invoice date**
 - **Remaining balance**: the "Budget Remaining" total
 - **All top-level task names** from the invoice table
+
+> **Partial contact info is normal.** If the invoice "INVOICE FOR" block only has a name and email (no street address, no phone, no title), populate only those fields and leave the rest as `""`. The resulting letter will render cleanly without blank lines.
 
 ---
 

@@ -225,8 +225,9 @@ def generate(data: dict):
 
     # ── 3. Recipient block ─────────────────────────────────────────────────────
     for line in [r['name'], r['title'], r['org'], r['address'], r['city_state_zip'], r['phone'], r['email']]:
-        p = doc.add_paragraph(line)
-        no_space(p)
+        if line and line.strip():
+            p = doc.add_paragraph(line)
+            no_space(p)
 
     doc.add_paragraph()   # blank line
 
